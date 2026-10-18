@@ -50,11 +50,15 @@ class Customer:
     service: str = ""
     status: str = "lead"
     notes: str = ""
-    created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat(timespec="seconds"))
-    updated_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat(timespec="seconds"))
+    created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat(timespec="microseconds"))
+    updated_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat(timespec="microseconds"))
 
 
 # ---------- store ----------
+
+class StoreError(ValueError):
+    """A store or identifier problem that must not silently change customer data."""
+
 
 class Store:
     def __init__(self, path: Path):
@@ -67,13 +71,27 @@ class Store:
             return
         try:
             data = json.loads(self.path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError as e:
-            print(f"warning: store file is corrupt: {e}", file=sys.stderr)
-            return
-        self.customers = [Customer(**c) for c in data.get("customers", [])]
+            if not isinstance(data, dict) or not isinstance(data.get("customers"), list):
+                raise ValueError("expected an object containing a customers list")
+            loaded = []
+            ids = set()
+            for row in data["customers"]:
+                if not isinstance(row, dict):
+                    raise ValueError("each customer must be an object")
+                customer = Customer(**row)
+                if not all(isinstance(value, str) for value in asdict(customer).values()):
+                    raise ValueError("customer fields must be strings")
+                if not customer.id or customer.id in ids:
+                    raise ValueError("customer IDs must be nonempty and unique")
+                ids.add(customer.id)
+                loaded.append(customer)
+        except (ValueError, TypeError, UnicodeError) as exc:
+            # Do not expose customer contents or pretend an unreadable store is empty.
+            raise StoreError("cannot load CRM store: invalid JSON or customer structure; no changes written") from exc
+        self.customers = loaded
 
     def save(self) -> None:
-        data = {"customers": [asdict(c) for c in self.customers], "saved_at": datetime.now(timezone.utc).isoformat(timespec="seconds")}
+        data = {"customers": [asdict(c) for c in self.customers], "saved_at": datetime.now(timezone.utc).isoformat(timespec="microseconds")}
         self.path.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
     def add(self, c: Customer) -> Customer:
@@ -82,10 +100,15 @@ class Store:
         return c
 
     def find(self, id_or_prefix: str) -> Customer | None:
-        for c in self.customers:
-            if c.id == id_or_prefix or c.id.startswith(id_or_prefix):
-                return c
-        return None
+        if not id_or_prefix:
+            raise StoreError("customer ID or prefix must not be empty")
+        exact = next((c for c in self.customers if c.id == id_or_prefix), None)
+        if exact is not None:
+            return exact
+        matches = [c for c in self.customers if c.id.startswith(id_or_prefix)]
+        if len(matches) > 1:
+            raise StoreError("ambiguous customer ID prefix; use the full ID")
+        return matches[0] if matches else None
 
     def update(self, id_or_prefix: str, **fields: Any) -> Customer | None:
         c = self.find(id_or_prefix)
@@ -94,7 +117,7 @@ class Store:
         for k, v in fields.items():
             if v is not None and hasattr(c, k):
                 setattr(c, k, v)
-        c.updated_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        c.updated_at = datetime.now(timezone.utc).isoformat(timespec="microseconds")
         self.save()
         return c
 
@@ -310,14 +333,17 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("stats", help="summary stats")
 
     args = p.parse_args(argv)
-    store = Store(Path(args.store))
-
     handlers = {
         "add": cmd_add, "list": cmd_list, "show": cmd_show,
         "update": cmd_update, "delete": cmd_delete, "search": cmd_search,
         "export": cmd_export, "stats": cmd_stats,
     }
-    return handlers[args.cmd](args, store)
+    try:
+        store = Store(Path(args.store))
+        return handlers[args.cmd](args, store)
+    except StoreError as exc:
+        print(f"CRM error: {exc}", file=sys.stderr)
+        return 2
 
 
 if __name__ == "__main__":

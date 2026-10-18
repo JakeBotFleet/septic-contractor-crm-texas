@@ -78,7 +78,13 @@ python crm.py delete <id>
 
 The default store file is `./crm_store.json` in the current directory. Override with `--store /path/to/file.json` or set the `OWS_CRM_STORE` environment variable.
 
-The store is a JSON file. You can back it up, copy it to another machine, or version-control it. The format is human-readable.
+The store is a human-readable JSON file containing customer information. Keep stores and exports private; do not commit them to a public repository.
+
+Timestamps are UTC ISO 8601 strings with microseconds so edits within the same second retain their recorded time. Existing stores with second-precision timestamps still load. `Store.update()` mutates the stored `Customer` in place; snapshot `updated_at` before an update when comparing values. Timestamps follow the system clock and are not revision identifiers.
+
+Existing empty, malformed, or structurally invalid store files stop the command with exit code `2`; they are not treated as a new store. Back up and repair the file before retrying. A nonexistent store path starts a new store.
+
+Customer commands accept a full ID or a unique prefix. An ambiguous or empty prefix stops with an error rather than choosing a customer. Full IDs are shown by `show` and included in exports.
 
 ## Service territory
 
