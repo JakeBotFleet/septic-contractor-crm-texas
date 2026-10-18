@@ -74,6 +74,23 @@ Delete:
 python crm.py delete <id>
 ```
 
+## Python API
+
+`OutWestSepticCustomer`, `OutWestSepticCRMStore`, and `OutWestSepticCRMError` are the public implementation classes. `Customer`, `Store`, and `StoreError` remain exact aliases for existing callers.
+
+This example uses a disposable store and synthetic customer data:
+
+```python
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from crm import OutWestSepticCustomer, OutWestSepticCRMStore
+
+with TemporaryDirectory() as directory:
+    store = OutWestSepticCRMStore(Path(directory) / "customers.json")
+    store.add(OutWestSepticCustomer(id="example", name="Example lead", phone=""))
+    store.update("example", status="contacted")
+```
+
 ## Where the data lives
 
 The default store file is `./crm_store.json` in the current directory. Override with `--store /path/to/file.json` or set the `OWS_CRM_STORE` environment variable.
