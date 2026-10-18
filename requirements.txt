@@ -1,0 +1,2 @@
+# No external runtime dependencies. stdlib only.
+# Tests use unittest from stdlib.
